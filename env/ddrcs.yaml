@@ -1,0 +1,19 @@
+name: ddrcs
+channels:
+  - defaults
+  - bioconda
+  - conda-forge
+dependencies:
+  - numpy
+  - python<3.10
+  - scipy
+  - pip
+  - spyder
+  - dash > 2
+  - statsmodels
+  - flask
+  - plotly
+  - dash-core-components
+  - dash-bootstrap-components
+  - pip:
+    - pandas
