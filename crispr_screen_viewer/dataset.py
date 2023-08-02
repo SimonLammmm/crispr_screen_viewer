@@ -34,7 +34,7 @@ class DataSet:
         # shorthand internal name: label name
         avail_analyses = []
         for ans in ('drz', 'mag'):
-             if os.path.isfile(source_directory/f"{ans}_fdr.csv"):
+             if os.path.isfile(source_directory/f"{ans}_fdr.csv.gz"):
                  avail_analyses.append(ans)
 
         self.available_analyses = avail_analyses
@@ -42,7 +42,7 @@ class DataSet:
         self.score_labels = {'mag':'Log2(FC)', 'drz':'NormZ'}
 
         # put the data tables in {analysis_type:{score/fdr:pd.DataFrame}} format dictionary
-        exp_data = {ans:{stt:pd.read_csv(source_directory/f"{ans}_{stt}.csv", index_col=0)
+        exp_data = {ans:{stt:pd.read_csv(source_directory/f"{ans}_{stt}.csv.gz", index_col=0)
                          for stt in ('score', 'fdr')}
                     for ans in self.available_analyses}
 
@@ -58,7 +58,7 @@ class DataSet:
                             for stt in ('score', 'fdr')}
                        for ans in self.available_analyses}
 
-        comparisons = pd.read_csv(source_directory/'comparisons_metadata.csv', )
+        comparisons = pd.read_csv(source_directory/'comparisons_metadata.csv.gz', )
         # this is sometimes put in wrong...
         m = comparisons['Timepoint'] == 'endpoint'
         comparisons.loc[m, 'Timepoint'] = 'endpoints'
@@ -88,7 +88,7 @@ class DataSet:
         self.data_sources = comparisons.Source.fillna('Unspecified').unique()
         # main metadata tables
         self.comparisons = comparisons
-        self.experiments_metadata = pd.read_csv(f'{source_directory}/experiments_metadata.csv', )
+        self.experiments_metadata = pd.read_csv(f'{source_directory}/experiments_metadata.csv.gz', )
         # rename "Experiment name" to "Experiment ID" for consistency
         colmap = {k:k for k in self.experiments_metadata}
         colmap['Experiment name'] = 'Experiment ID'
@@ -117,7 +117,7 @@ class DataSet:
         # DF of previous symbols and IDs for currently used.
         try:
             pidf = pd.read_csv(
-                os.path.join(source_directory, 'previous_and_id.csv'), index_col=0
+                os.path.join(source_directory, 'previous_and_id.csv.gz'), index_col=0
             )
             # switching to using the default names in hgnc_complete_text.txt
             #   so here's another inconsistancy fix...
@@ -130,7 +130,7 @@ class DataSet:
             self.previous_and_id = pidf.fillna('')
 
         except FileNotFoundError:
-            LOG.warning("file 'previous_and_id.csv' is missing.")
+            LOG.warning("file 'previous_and_id.csv.gz' is missing.")
             # when .loc fails to find a name in the table it just uses the current name.
             self.previous_and_id = pd.DataFrame()
 
@@ -156,7 +156,7 @@ class DataSet:
             if missing_in_data.shape[0] > 0:
                 all_good = False
                 print(
-                    f"Comparisons in comparisons metadata but not in {ans}_score.csv:"
+                    f"Comparisons in comparisons metadata but not in {ans}_score.csv.gz:"
                     f"\n    {', '.join(missing_in_data)}\n"
                 )
             score_in_meta = score_comps.isin(meta_comps)
@@ -164,7 +164,7 @@ class DataSet:
             if missing_in_data.shape[0] > 0:
                 all_good = False
                 print(
-                    f"Comparisons in {ans}_score.csv, but not in comparisons metadata:"
+                    f"Comparisons in {ans}_score.csv.gz, but not in comparisons metadata:"
                     f"\n    {', '.join(missing_in_score)}\n"
                 )
         comps = self.comparisons.index
@@ -189,7 +189,7 @@ class DataSet:
         for ans in self.available_analyses:
             score_index = self.exp_data[ans]['score'].index
             m = score_index.isin(self.previous_and_id.index)
-            print(m.sum(), 'of', len(m), f'gene symbols have record in previous_and_id.csv, in file {ans}_score.csv')
+            print(m.sum(), 'of', len(m), f'gene symbols have record in previous_and_id.csv.gz, in file {ans}_score.csv.gz')
 
 
     def get_score_fdr(self, score_anls:str, fdr_anls:str=None,
