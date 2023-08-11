@@ -61,7 +61,7 @@ class DataSet:
             self.con.close()
             genes0 = [g[0] for g in genes1]
             genes = genes.union(genes0)
-        self.genes = genes0
+        self.genes = genes
         # # reindex with the union of genes
         # self.exp_data = {ans:{stt:exp_data[ans][stt].reindex(genes)
         #                     for stt in ('score', 'fdr')}
