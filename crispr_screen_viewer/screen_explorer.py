@@ -299,7 +299,7 @@ def initiate(app, data_set:DataSet, public=False) -> Div:
 
         # get x, y and genes values
         # todo LFC as it's own table!
-        score_fdr = data_set.get_score_fdr('mag', sig_source)
+        score_fdr = data_set.get_score_fdr('mag', sig_source, comparisons = [compid])
         score, fdr = [score_fdr[k][compid].dropna() for k in ('score', 'fdr')]
 
         # some genes may get filtered out
@@ -342,8 +342,8 @@ def initiate(app, data_set:DataSet, public=False) -> Div:
         score_lab = data_set.score_labels[stat_source]
 
         # data for the table
-        dat = data_set.get_score_fdr(stat_source, stat_source)
-        lfc = data_set.get_score_fdr('mag', 'mag')['score'][selected_comp]
+        dat = data_set.get_score_fdr(stat_source, stat_source, comparisons=[selected_comp])
+        lfc = data_set.get_score_fdr('mag', 'mag', comparisons=[selected_comp])['score'][selected_comp]
         score = dat['score'][selected_comp]
         fdr = dat['fdr'][selected_comp]
 

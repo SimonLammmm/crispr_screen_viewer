@@ -1,6 +1,7 @@
 from pathlib import Path
 import pandas as pd
 import os, pickle
+import sqlite3
 from typing import Dict, Collection
 from crispr_screen_viewer.functions_etc import (
     timepoint_labels,
@@ -29,7 +30,7 @@ class DataSet:
         LOG.debug(source_directory)
         source_directory = Path(source_directory)
         # for future ref
-        self.source_directory = source_directory
+        self.source_directory = str(source_directory)
 
         # shorthand internal name: label name
         avail_analyses = []
@@ -41,22 +42,30 @@ class DataSet:
         self.analysis_labels = {'drz':'DrugZ', 'mag':'MAGeCK'}
         self.score_labels = {'mag':'Log2(FC)', 'drz':'NormZ'}
 
-        # put the data tables in {analysis_type:{score/fdr:pd.DataFrame}} format dictionary
-        exp_data = {ans:{stt:pd.read_csv(source_directory/f"{ans}_{stt}.csv.gz", index_col=0)
-                         for stt in ('score', 'fdr')}
-                    for ans in self.available_analyses}
+        # # put the data tables in {analysis_type:{score/fdr:pd.DataFrame}} format dictionary
+        # exp_data = {ans:{stt:pd.read_csv(source_directory/f"{ans}_{stt}.csv.gz", index_col=0)
+        #                  for stt in ('score', 'fdr')}
+        #             for ans in self.available_analyses}
 
         # unify the indexes
+        
+        
         genes = pd.Index([])
         # use an index from a table from each analysis
         for analysis in self.available_analyses:
-            genes = genes.union(exp_data[analysis]['fdr'].index)
-        self.genes = genes
-
-        # reindex with the union of genes
-        self.exp_data = {ans:{stt:exp_data[ans][stt].reindex(genes)
-                            for stt in ('score', 'fdr')}
-                       for ans in self.available_analyses}
+        # genes = genes.union(exp_data[analysis]['fdr'].index)
+            self.con = sqlite3.connect(self.source_directory + '/ddrcs.db', uri=True)
+            self.c = self.con.cursor()
+            genes_cursor = self.c.execute("SELECT [gene] FROM " + analysis + "_score")
+            genes1 = genes_cursor.fetchall()
+            self.con.close()
+            genes0 = [g[0] for g in genes1]
+            genes = genes.union(genes0)
+        self.genes = genes0
+        # # reindex with the union of genes
+        # self.exp_data = {ans:{stt:exp_data[ans][stt].reindex(genes)
+        #                     for stt in ('score', 'fdr')}
+        #                for ans in self.available_analyses}
 
         comparisons = pd.read_csv(source_directory/'comparisons_metadata.csv.gz', )
         # this is sometimes put in wrong...
@@ -146,7 +155,13 @@ class DataSet:
           in the other"""
         all_good = True
         for ans in self.available_analyses:
-            score_comps = self.exp_data[ans]['score'].columns
+            self.con = sqlite3.connect(self.source_directory + '/ddrcs.db', uri=True)
+            self.c = self.con.cursor()
+            score_comps_cursor = self.c.execute("SELECT * FROM " + ans + "_score")
+            score_comps = [d[0] for d in score_comps_cursor.description]
+            self.con.close()
+            score_comps = pd.DataFrame(index = score_comps).index
+            #score_comps = self.exp_data[ans]['score'].columns
             meta_comps = self.comparisons.index
 
             meta_in_score = meta_comps.isin(score_comps)
@@ -187,20 +202,33 @@ class DataSet:
     def validate_previous_and_id(self):
         """Check all stats index in datasets are in previous_and_id"""
         for ans in self.available_analyses:
-            score_index = self.exp_data[ans]['score'].index
-            m = score_index.isin(self.previous_and_id.index)
+            self.con = sqlite3.connect(self.source_directory + '/ddrcs.db', uri=True)
+            self.c = self.con.cursor()
+            score_genes_cursor = self.c.execute("SELECT [gene] FROM " + ans + "_score")
+            score_genes = score_genes_cursor.fetchall()
+            self.con.close()
+            score_genes0 = [g[0] for g in score_genes]
+            score_index = pd.DataFrame(score_genes0, index = score_genes0)
+            #score_index = self.exp_data[ans]['score'].index
+            m = score_index.index.isin(self.previous_and_id.index)
             print(m.sum(), 'of', len(m), f'gene symbols have record in previous_and_id.csv.gz, in file {ans}_score.csv.gz')
 
 
     def get_score_fdr(self, score_anls:str, fdr_anls:str=None,
+                      comparisons:list=None, genes:list=None,
                       data_sources:Collection= 'all') -> Dict[str, pd.DataFrame]:
-        """Get score and FDR tables for the analysis types & data sets.
+        """Get score and FDR tables for the analysis types & data sets
+        for the genes and comparisons specified.
         Tables give the per gene values for included comparisons.
 
         Arguments:
             score_anls: The analysis type from which to get the score values
                 per gene
             fdr_anls: Optional. As score_anslys
+            comparisons: Optional. Return only the comparisons specified.
+                Default None. If None, then all comparisons are returned.
+            genes: Optional. Return only the genes specified. Default None.
+                If None, then return all genes.
             data_sources: Data sources (i.e. SPJ, or other peoples papers) to
                 include in the returned DFs. Any comparison that comes from a
                 dataset that does not have both fdr/score analysis types
@@ -211,12 +239,68 @@ class DataSet:
 
         # todo surely we don't need to do this every time?
         #   write tables for each score/stat, store in a dict
-
+        
         # if only one type supplied, copy it across
         if fdr_anls is None:
             fdr_anls = score_anls
 
-        score_fdr = {stt:self.exp_data[ans][stt] for ans, stt in ((score_anls, 'score'), (fdr_anls, 'fdr'))}
+        # SQL query builder: score
+        query_score = "SELECT "
+        # comparisons control
+        if comparisons is None:
+            query_score = query_score + "*"
+        else:
+            query_score_comparisons = comparisons.copy()
+            query_score_comparisons.insert(0, "gene") 
+            query_score = query_score + "[" + "],[".join(query_score_comparisons) + "]" 
+        # method control
+        query_score_anls = score_anls + "_score"
+        query_score = query_score + " FROM " + query_score_anls
+        # genes control
+        self.con = sqlite3.connect(self.source_directory + '/ddrcs.db', uri=True)
+        self.c = self.con.cursor()
+        if genes is not None:
+            query_score = query_score + " WHERE gene = ?"
+            for x in range(1, len(genes)):
+                query_score = query_score + " OR gene = ?"
+            scoreCursor = self.c.execute(query_score, (genes))
+        else:
+            scoreCursor = self.c.execute(query_score)
+                
+        score = pd.DataFrame(scoreCursor.fetchall(), columns = [d[0] for d in scoreCursor.description])
+        self.con.close()
+        score = score.set_index('gene')
+        
+        # SQL query builder: fdr
+        query_fdr = "SELECT "
+        # comparisons control
+        if comparisons is None:
+            query_fdr = query_fdr + "*"
+        else:
+            query_fdr_comparisons = comparisons.copy()
+            query_fdr_comparisons.insert(0, "gene") 
+            query_fdr = query_fdr + "[" + "],[".join(query_fdr_comparisons) + "]" 
+        # method control
+        query_fdr_anls = fdr_anls + "_fdr"
+        query_fdr = query_fdr + " FROM " + query_fdr_anls
+        # genes control
+        self.con = sqlite3.connect(self.source_directory + '/ddrcs.db', uri=True)
+        self.c = self.con.cursor()
+        if genes is not None:
+            query_fdr = query_fdr + " WHERE gene = ?"
+            for x in range(1, len(genes)):
+                query_fdr = query_fdr + " OR gene = ?"
+            fdrCursor = self.c.execute(query_fdr, (genes))
+        else:
+            fdrCursor = self.c.execute(query_fdr)
+            
+        fdr = pd.DataFrame(fdrCursor.fetchall(), columns = [d[0] for d in fdrCursor.description])
+        self.con.close()
+        fdr = fdr.set_index('gene')
+        
+        score_fdr = {'score':score, 'fdr':fdr}
+        
+        # score_fdr = {stt:self.exp_data[ans][stt] for ans, stt in ((score_anls, 'score'), (fdr_anls, 'fdr'))}     
 
         if data_sources == 'all':
             return score_fdr

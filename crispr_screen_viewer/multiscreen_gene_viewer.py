@@ -127,7 +127,9 @@ def initiate(app, data_set, public=True) -> Div:
                     show_outliers = False
 
 
-            data_tabs:Dict[str, pd.DataFrame] = data_set.get_score_fdr(score_type, score_type, )
+            data_tabs:Dict[str, pd.DataFrame] = data_set.get_score_fdr(score_type, score_type, comparisons=comps)
+            data_tabs['score'] = data_tabs['score'].filter(regex='^(?!.*Non-targeting.*)', axis=0)
+            data_tabs['fdr'] = data_tabs['fdr'].filter(regex='^(?!.*Non-targeting.*)', axis=0)
             filtered_scores = data_tabs['score'].loc[selected_genes, comps]
 
             # *assemble the figure*
@@ -276,7 +278,7 @@ def initiate(app, data_set, public=True) -> Div:
 
             comps = comps_dict['selected_comps']
             LOG.debug(f"{getfuncstr()}: {comps}")
-            data_tabs = data_set.get_score_fdr(score_type, score_type, )
+            data_tabs = data_set.get_score_fdr(score_type, score_type, genes=selected_genes)
             filtered_scores:pd.DataFrame = data_tabs['score'].loc[selected_genes, comps]
 
             comp_label_dict = {c:l for c, l in
@@ -290,7 +292,7 @@ def initiate(app, data_set, public=True) -> Div:
             if filtered_scores.isna().any().any():
                 data_missing = True
                 missing_comps = index_of_true(filtered_scores.isna().any())
-                missing_genes = index_of_true(filtered_scores.isna().any(1))
+                missing_genes = index_of_true(filtered_scores.isna().any())
                 # to be returned in the Div
                 misslabs = '\n    '.join([comp_label_dict[c] for c in missing_comps])
                 missing_text = f"Sample(s) has missing genes:\n  {misslabs}"
@@ -384,7 +386,7 @@ def initiate(app, data_set, public=True) -> Div:
 
             LOG.debug(f"{getfuncstr()}:\n\tordered_comps={ordered_comps}")
 
-            data_tabs = data_set.get_score_fdr(score_type, score_type, )
+            data_tabs = data_set.get_score_fdr(score_type, score_type, genes=selected_genes)
             filtered_scores = data_tabs['score'].loc[selected_genes, ordered_comps]
 
             # DataTable structure:
@@ -638,7 +640,7 @@ def initiate(app, data_set, public=True) -> Div:
                       f"\tgenes={selected_genes}, fdr_thresh={fdr_thresh}\n"
                       f"\tfilters={filters}")
 
-            data_tabs = data_set.get_score_fdr(score_type, score_type, )
+            data_tabs = data_set.get_score_fdr(score_type, score_type, genes=selected_genes)
 
             filter_mask = pd.Series(True, index=data_set.comparisons.index)
             for filter_id, values in zip(filter_cols, filters):
