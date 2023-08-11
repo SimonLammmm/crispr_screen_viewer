@@ -15,5 +15,6 @@ dependencies:
   - plotly
   - dash-core-components
   - dash-bootstrap-components
+  - sqlite
   - pip:
     - pandas
