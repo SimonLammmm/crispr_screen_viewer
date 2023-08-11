@@ -35,8 +35,8 @@ class DataSet:
         # shorthand internal name: label name
         avail_analyses = []
         for ans in ('drz', 'mag'):
-             if os.path.isfile(source_directory/f"{ans}_fdr.csv.gz"):
-                 avail_analyses.append(ans)
+             #if os.path.isfile(source_directory/f"{ans}_fdr.csv.gz"): # no longer using
+             avail_analyses.append(ans)
 
         self.available_analyses = avail_analyses
         self.analysis_labels = {'drz':'DrugZ', 'mag':'MAGeCK'}
