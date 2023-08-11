@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import pandas as pd
 import os, pickle
 import sqlite3
@@ -59,9 +60,14 @@ class DataSet:
             genes_cursor = self.c.execute("SELECT [gene] FROM " + analysis + "_score")
             genes1 = genes_cursor.fetchall()
             self.con.close()
-            genes0 = [g[0] for g in genes1]
+            genes0 = [str(g[0]) for g in genes1]
             genes = genes.union(genes0)
-        self.genes = genes
+        # remove non-targeting and sequences from the genes list
+        r = re.compile("^(?!.*Non-targeting.*)")
+        genes = list(filter(r.match, list(genes)))
+        r = re.compile("^(?!.*[ATCG]{19}.*)")
+        genes = list(filter(r.match, list(genes)))
+        self.genes = pd.Index(genes)
         # # reindex with the union of genes
         # self.exp_data = {ans:{stt:exp_data[ans][stt].reindex(genes)
         #                     for stt in ('score', 'fdr')}
