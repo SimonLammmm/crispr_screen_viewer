@@ -241,7 +241,7 @@ def spawn_filter_dropdowns(
                         multi=True,
                         style={'min-height':'80px', 'width':'100%'},
                         value=value,
-                        options=[{'label':v, 'value':v} for v in sorted(comparisons[col].unique())]
+                        options=[{'label':v, 'value':v} for v in sorted(str(comparisons[col].unique()))]
                     ),
                 ])
             ],

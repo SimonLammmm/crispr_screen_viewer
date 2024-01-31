@@ -57,7 +57,10 @@ class DataSet:
         # genes = genes.union(exp_data[analysis]['fdr'].index)
             self.con = sqlite3.connect(self.source_directory + '/ddrcs.db', uri=True)
             self.c = self.con.cursor()
-            genes_cursor = self.c.execute("SELECT [gene] FROM " + analysis + "_score")
+            if analysis == "drz":
+                genes_cursor = self.c.execute("SELECT [gene] FROM " + analysis + "_score")
+            elif analysis == "mag":
+                genes_cursor = self.c.execute("SELECT [id] FROM " + analysis + "_score")
             genes1 = genes_cursor.fetchall()
             self.con.close()
             genes0 = [str(g[0]) for g in genes1]
@@ -210,7 +213,10 @@ class DataSet:
         for ans in self.available_analyses:
             self.con = sqlite3.connect(self.source_directory + '/ddrcs.db', uri=True)
             self.c = self.con.cursor()
-            score_genes_cursor = self.c.execute("SELECT [gene] FROM " + ans + "_score")
+            if ans == "drz":
+                score_genes_cursor = self.c.execute("SELECT [gene] FROM " + ans + "_score")
+            elif ans == "mag":
+                score_genes_cursor = self.c.execute("SELECT [id] FROM " + ans + "_score")
             score_genes = score_genes_cursor.fetchall()
             self.con.close()
             score_genes0 = [g[0] for g in score_genes]
