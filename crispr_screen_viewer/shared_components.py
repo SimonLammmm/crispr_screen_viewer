@@ -231,6 +231,10 @@ def spawn_filter_dropdowns(
             value = values[col]
         except:
             value = []
+            
+        choices = []
+        for choice in comparisons[col].unique():
+            choices.append(str(choice))
 
         drpdwn = dbc.Card(
             [
@@ -241,7 +245,7 @@ def spawn_filter_dropdowns(
                         multi=True,
                         style={'min-height':'80px', 'width':'100%'},
                         value=value,
-                        options=[{'label':v, 'value':v} for v in sorted(str(comparisons[col].unique()))]
+                        options=[{'label':v, 'value':v} for v in sorted(choices)]
                     ),
                 ])
             ],
