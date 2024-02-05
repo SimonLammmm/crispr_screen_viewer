@@ -326,9 +326,9 @@ def tabulate_drugz_files(file_names, prefix, compjoiner='-'):
 def get_selector_table_filter_keys(public=False) -> Dict[str, List[str]]:
     """Get dictionary used to filter the exp and comp tables. """
     filter_keys = {
-        'exp':['Treatment', 'Cell line', 'KO', 'Library'],
+        'exp':['Treatment', 'Cell line', 'KO', 'Library', 'Exorcised'],
         'comp':['Treatment', 'Cell line', 'KO', 'Timepoint',
-                'Library', 'Citation',]
+                'Library', 'Exorcised', 'Citation',]
     }
     if not public:
         for k, l in filter_keys.items():
@@ -340,10 +340,10 @@ def get_metadata_table_columns(public, page_id) -> Dict[str, List[str]]:
     # this is set up so that different pages can recieve different columns but
     # at the time of writing they all use the same...
     tab_columns = {
-        'exp':['Citation', 'Treatment', 'Cell line', 'KO',  'Library', 'DOI',  'Date'],
+        'exp':['Citation', 'Treatment', 'Cell line', 'KO',  'Library', 'Exorcised', 'DOI',  'Date'],
         'comp':['Treatment', 'Dose', 'Timepoint',
                 'Growth inhibition %', 'Days grown', 'Cell line', 'KO',
-                'Library', 'Citation', 'DOI', ]
+                'Library', 'Exorcised', 'Citation', 'DOI', ]
     }
     # tab_columns_private = {
     #     'exp':['Treatment', 'Cell line', 'KO',  'Library', 'Citation', 'DOI'],
