@@ -1,7 +1,5 @@
 :root {
     --our-color: #3db9c2;
-    --select-color: #E865DF;
-    --view-color: #DFE865
 }
 
 .centre {
@@ -46,7 +44,7 @@ other setting when conditions are true.*/
 }
 
 .selector-tab {
-    background-color: #93A9E5 !important;
+    background-color: #ccddff !important;
     width: 200px !important;
     display: block; !important;
     align-items: center;
@@ -54,11 +52,11 @@ other setting when conditions are true.*/
 
 }
 .selector-tab--selected {
-    background-color: #6683D3 !important;
+    background-color: #b3ccff !important;
 }
 
 .data-tab {
-    background-color: #8DED99 !important;
+    background-color: #ccff99 !important;
     width: 200px !important;
     display: block; !important;
     align-items: center;
@@ -66,7 +64,7 @@ other setting when conditions are true.*/
 
 }
 .data-tab--selected {
-    background-color: #5EE06E !important;
+    background-color: #b3ff66 !important;
 }
 
 .selector-results-tabs {
@@ -119,11 +117,6 @@ other setting when conditions are true.*/
     justify-content: center;
 }
 
-.spacey-flex {
-    display: flex;
-    justify-content: space-around;
-}
-
 .inputPanel {
 }
 
@@ -162,23 +155,4 @@ other setting when conditions are true.*/
 
 #h1 #h2 .home-text {
     padding-top: 80px;
-}
-
-.options-horizontal {
-    display: flex;
-    flex-direction: row;
-}
-
-.no-data-paragraph {
-    padding: 40px;
-    background-color: lightsalmon;
-    width: 400px;
-    font-size: larger;
-}
-
-.missing-data-paragraph {
-    padding: 10px;
-    background-color: lightsalmon;
-    width: fit-content;
-    font-size: small;
 }

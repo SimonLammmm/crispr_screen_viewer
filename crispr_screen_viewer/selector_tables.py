@@ -1,7 +1,5 @@
 import copy
-import typing
 
-import dash
 from dash import Dash
 
 from dash.dependencies import Input, Output, State
@@ -22,14 +20,14 @@ from crispr_screen_viewer.functions_etc import (
 
 from dash.exceptions import PreventUpdate
 
-from crispr_screen_viewer.shared_components import (
+from shared_components import (
     spawn_filter_dropdowns
 )
 
 Div = html.Div
 import pandas as pd
 
-from crispr_screen_viewer.dataset import (
+from crispr_screen_viewer.functions_etc import (
     DataSet,
     load_dataset
 )
@@ -39,15 +37,12 @@ import dash_bootstrap_components as dbc
 from typing import List, Dict
 
 
-radiobutton = '◎'
-selectedradiobutton = '◉'
-
 def get_compid_from_rowi(table_data, rowi):
     """table_data from Input(table_id, 'data').
     rowi from Input(table_id, 'selected_rows')[n]"""
     return table_data[rowi]['Comparison ID']
 
-def prep_exp_data(data_set:DataSet) -> (pd.DataFrame, pd.DataFrame):
+def prep_exp_data(data_set:DataSet):
     """return DataFrames of (experiment_data, searchable_experiment_data). The
     latter containing lists of values to be searched against."""
     comparisons = data_set.comparisons
@@ -95,16 +90,8 @@ def register_filter_callbacks(app, id_prefix, exp_or_comp, filter_columns,
         f"   Inputs: {id_prefix}-{exp_or_comp}-filter-{{col}} for col in {filter_columns}"
     )
 
-    # cm-comp-table is a special case because the output should go via the X/Y
-    # selection callback, so here we output to a special Store which is read
-    # by the XY callback
-    if table_id == 'cm-comp-table':
-        output_data = Output('cm-comp-table-data', 'data')
-    else:
-        output_data = Output(table_id, 'data')
-
     @app.callback(
-        output_data,
+        Output(table_id, 'data'),
         Output(table_id, 'selected_rows'),
         # Filters from metadata columns, additional filtrs go after
         [Input(f'{id_prefix}-{exp_or_comp}-filter-{filtr_col}', 'value') for filtr_col in filter_columns],
@@ -112,14 +99,13 @@ def register_filter_callbacks(app, id_prefix, exp_or_comp, filter_columns,
         State(table_id, 'data'),
     )
     def filter_selector_table(*filters_etc):
-        """Filter rows in the exp or comp tables based on values in the
+        """Filter rows in the exp or comp tables based on value values in the
         filter boxes."""
-        LOG.debug(f'CALLBACK: filter_selector_table:\n\tTriggered by '
-                  f'{callback_context.triggered[0]["prop_id"]}\n\tfilters ={filters_etc[:-2]};')
+        LOG.debug(f'CALLBACK: filter_selector_table:\n\tTriggered by {callback_context.triggered[0]["prop_id"]}\n\tfilters ={filters_etc[:-2]};')
 
         selected_row = filters_etc[-2]
         table_data   = filters_etc[-1]
-
+        #print(table_data)
         if not callback_context.triggered:
             raise PreventUpdate
 
@@ -146,6 +132,7 @@ def register_filter_callbacks(app, id_prefix, exp_or_comp, filter_columns,
                 filtered_table = filtered_table.loc[
                     searchable_data[col].apply(lambda vals: any([v in filtr for v in vals]))
                 ]
+
 
         # if we've switched tables, deselect rows cus the row names don't match anymore
         for trigger in callback_context.triggered:
@@ -177,9 +164,12 @@ def register_filter_callbacks(app, id_prefix, exp_or_comp, filter_columns,
 
 def register_exptable_filters_comps(app, id_prefix):
     """Register the callback that causes row selections in the exp-table
-    to filter the comp table, via the '{id_prefix}-comp-filter-{Experiment ID}'."""
+    to filter the comp table, via the '{id_prefix}-comp-filter-{Experiment ID}'.
+
+    Current implimentation means that any change to selected rows will override
+    selections made via the dropdown. Which is probably fine."""
     @app.callback(
-        Output(f"{id_prefix}-comp-filter-Citation", 'value'),
+        Output(f"{id_prefix}-comp-filter-Experiment ID", 'value'),
         Input(f"{id_prefix}-exp-table", 'selected_rows'),
         State(f"{id_prefix}-exp-table", 'data'),
         #State(f"{id_prefix}-comp-filter-Experiment ID", 'value'),
@@ -187,125 +177,27 @@ def register_exptable_filters_comps(app, id_prefix):
     def filter_comps_by_exp(selected_rows, table_data, ):
         selected_exps = []
         for rowi in selected_rows:
-            exp = table_data[rowi]['Citation']
+            exp = table_data[rowi]['Experiment ID']
             selected_exps.append(exp)
         return selected_exps
 
 
-def get_DataTable(id_prefix, table_type, columns, data,
-                  ) -> DataTable:
+def get_DataTable(id_prefix, table_type, columns, data) -> DataTable:
     idd = f'{id_prefix}-{table_type}-table'
     LOG.debug(f"get_DataTable(id={idd}, columns={columns})")
     selectable = {'exp':'multi', 'comp':'single'}[table_type]
-
-    # these kwargs shared between tables
-    dt_kwargs = dict(
+    return DataTable(
         id=idd,
         # leaving it out of columns doesn't stop it from being in the table data
+        columns=[datatable_column_dict(c) for c in columns if c != 'Comparison ID' ],
+        data=data.to_dict('records'),
         sort_action='native',
         sort_mode="multi",
+        selected_rows=[],
+        row_selectable=selectable,
         css=[{"selector": "p", "rule": "margin: 0"}],
         style_cell=cell_text_style,
     )
-
-    # deal with the X/Y row selection
-    if (id_prefix == 'cm') and (table_type == 'comp'):
-        # Add XY columns with radio buttons displayed
-        for xy in 'XY':
-            data.loc[:, xy] = radiobutton
-        dt_kwargs['data'] = data.to_dict('records')
-
-        # add the XY columns to the columns
-        dt_kwargs['columns'] = [datatable_column_dict(c) for c in ['X', 'Y']+columns]
-
-        # center the buttons
-        dt_kwargs['style_cell_conditional'] = [
-             {
-                 'if': {'column_id': c},
-                 'textAlign': 'center'
-             } for c in "XY"
-         ]
-    else:
-        dt_kwargs['selected_rows'] = []
-        dt_kwargs['row_selectable'] = selectable
-        dt_kwargs['data'] = data.to_dict('records')
-
-        dt_kwargs['columns'] = [datatable_column_dict(c) for c in columns]
-
-    return DataTable(
-        **dt_kwargs
-    )
-
-
-def register_comp_table_xy_row_selection(app, id_prefix):
-    """Update selected-comps when X or Y column is selected.
-    Update cm XY table data to show which rows selected.
-
-    Also updates actual table_data when filters are applied to the comp
-    table, via Input('cm-comp-table-data', 'data')"""
-    LOG.info('Register comp table XY by cell selection')
-    table_id = f'{id_prefix}-comp-table'
-    @app.callback(
-        #Output('selected-comps', 'data'),
-        Output('cm-x-selector', 'value'),
-        Output('cm-y-selector', 'value'),
-        Output(table_id, 'data'),
-        Output('cm-x-selector', 'options'),
-        Output('cm-y-selector', 'options'),
-        #Output('testout', 'children'),
-
-        Input(table_id, 'active_cell'),
-        Input('cm-comp-table-data', 'data'),
-        # d_v_d means that in browser sorted data is available in the correct order
-        State(table_id, "derived_viewport_data"),
-        State('selected-comps', 'data'),
-        State('cm-x-selector', 'options')
-
-    )
-    def update_selected_xy(active_cell, table_data, viewport_data,
-                           selected_comps, comp_options):
-        LOG.debug('CM XY selection by active cell:')
-        # first, deal with updates to table data from filters
-        if any([trig['prop_id'] == 'cm-comp-table-data.data'
-                for trig in callback_context.triggered]):
-            LOG.debug('\tTriggered by filters, just updating table data')
-            if table_data is None: # this happens on first load
-                raise PreventUpdate
-            else:
-                return dash.no_update, dash.no_update, table_data, dash.no_update, dash.no_update
-
-
-        if (not active_cell) or (active_cell['column'] > 1):
-            raise PreventUpdate
-
-        prev_selected = copy.copy(selected_comps)
-
-        axiskey = 'XY'[active_cell['column']]
-        LOG.debug(f'\taxiskey = {axiskey}')
-
-        # Format of active_cell is {'row': 0, 'column': 0, 'column_id': str}
-        rowi = active_cell['row']
-        compid = viewport_data[rowi]['Comparison ID']
-
-        # reset selected buttons
-        for row in viewport_data:
-            row[axiskey] = radiobutton
-        viewport_data[rowi][axiskey] = selectedradiobutton
-
-        selected_comps[axiskey] = compid
-        LOG.debug(f'comp_options={comp_options}')
-
-        if comp_options:
-            co = set(comp_options)
-        else:
-            co = set()
-        co.add(compid)
-        comp_options = list(sorted(set(co)))
-
-        LOG.debug('\t'+str(active_cell)+'\n\t'+str(selected_comps)+'\n\t'+str(comp_options))
-
-        return (selected_comps['X'], selected_comps['Y'], viewport_data,
-                comp_options, comp_options)
 
 
 def spawn_selector_tables(
@@ -314,8 +206,8 @@ def spawn_selector_tables(
     """Generate two DataTables, experiment and comparison (called treatment
     in parlance of the website). Returned in dict with keys 'exp' and 'comp'.
     Registers callbacks with each to handle filtering via values from the
-    filter boxes.
-    """
+    filter boxes."""
+
 
     LOG.debug(f"Spawning selection tables for page {id_prefix}")
     exp_data, exp_data_searchable = prep_exp_data(data_set)
@@ -336,8 +228,6 @@ def spawn_selector_tables(
         )
 
     register_exptable_filters_comps(app, id_prefix)
-    if id_prefix == 'cm':
-        register_comp_table_xy_row_selection(app, 'cm')
 
     return components
 
@@ -354,7 +244,7 @@ def spawn_selector_tabs(
     @app.callback(
         Output(f'{id_prefix}-results-control-panel', 'style'),
         Output(f'{id_prefix}-gene-selector-div', 'style'),
-        Input( f'{id_prefix}-tabs', 'value'),
+        Input(f'{id_prefix}-tabs', 'value'),
     )
     def hide_comp_gene_selectors(selected_tab):
         """Set comparison/gene selector dropdown container's
@@ -381,7 +271,7 @@ def spawn_selector_tabs(
     return [
         # selector tabs
         dcc.Tab(
-            value=f'{id_prefix}-exp-tab', label='Filter by Article',
+            value=f'{id_prefix}-exp-tab', label='Select Experiment',
             className='selector-tab', selected_className='selector-tab--selected',
             children=[
                 html.P(
@@ -445,9 +335,9 @@ def spawn_treatment_reselector(id_prefix, is_xy:bool) -> Div:
             dds = ('comp',)
 
         for xy in dds:
-            label = {'x':'X treatment ID',
-                     'y':'Y treatment ID',
-                     'comp':'Treatment ID'}[xy]
+            label = {'x':'X treatment',
+                     'y':'Y treatment',
+                     'comp':'Treatment'}[xy]
             id=f'{id_prefix}-{xy}-selector'
             xy_selector = dcc.Dropdown(
                 id=id,
@@ -468,7 +358,7 @@ def spawn_treatment_reselector(id_prefix, is_xy:bool) -> Div:
             dbc.Card(
                 [
                     dbc.CardHeader(
-                        "Previously selected treatments:"
+                        "Previously selected treatments are available below."
                     ),
                     dbc.CardBody(
                         get_xy_selectors(id_prefix, is_xy)

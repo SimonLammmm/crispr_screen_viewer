@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 import logging
 import copy
 import pandas as pd
@@ -18,17 +16,23 @@ from dash.dependencies import Input, Output, State
 from typing import Collection, Union, Dict, List, Callable
 
 from crispr_screen_viewer.functions_etc import (
+    DataSet,
     datatable_column_dict,
+    doi_to_link,
     get_cmdline_options,
-    get_table_title_text,
-    get_treatment_label
+    get_selector_table_filter_keys,
+    cell_number_style,
+    cell_text_style
 )
 
 from crispr_screen_viewer.shared_components import (
-    get_gene_dropdown_lab_val,
+    get_lab_val,
+    get_treatment_label,
     get_annotation_dicts,
+    big_text_style,
     LOG,
     get_stat_source_selector,
+    timepoint_labels,
     register_gene_selection_processor,
     spawn_gene_dropdown,
 )
@@ -38,9 +42,10 @@ from crispr_screen_viewer.selector_tables import (
     spawn_selector_tabs,
     spawn_treatment_reselector,
     get_selector_table_filter_keys,
+    register_exptable_filters_comps
 )
-from crispr_screen_viewer.shared_components import spawn_filter_dropdowns
-from crispr_screen_viewer.dataset import DataSet
+from shared_components import spawn_filter_dropdowns
+
 Div = html.Div
 
 
@@ -48,6 +53,13 @@ idprfx_res_table = 'gene-results-table'
 # String used to distinguish reused components across pages. Component IDs used by dash
 #   preceeded by this string
 PAGE_ID = 'se'
+
+
+
+
+
+
+
 
 def spawn_volcano_graph(app, fig_id=f'{PAGE_ID}-volcano'):
     """Return layout containing the plotly Graph object and stat/gene
@@ -113,12 +125,9 @@ def spawn_volcano_graph(app, fig_id=f'{PAGE_ID}-volcano'):
                 mode='markers',
                 customdata=fdr,
                 text=genes,
-                hovertemplate= (
-                        "<b>%{text}</b><br>" +
-                        "LFC: %{x:.2f}<br>" +
-                        "FDR: %{customdata:.2e}" +
-                        "<extra></extra>"
-                    ),
+                hovertemplate= ("<b>%{text}</b><br>" +
+                                "LFC: %{x:.2f}<br>" +
+                                "FDR: %{customdata:.2e}"),
                 ),
             layout={'clickmode':'event+select',
                     'dragmode':'select'},
@@ -215,8 +224,27 @@ def initiate(app, data_set:DataSet, public=False) -> Div:
     # ############## #
 
 
-    tabs = dcc.Tabs(
-        id=f'{PAGE_ID}-tabs', value=f'{PAGE_ID}-comp-tab', children=[
+        # # experiment selector
+        # dcc.Tab(value=f'{PAGE_ID}-exp-tab', label='Select Experiment',
+        #         className='selector-tab', selected_className='selector-tab--selected', children=[
+        #     html.P(['Choose an experiment below to filter the options in "Select Treatment" table. '
+        #             'Go straight to Select Treatment to see all options.'],
+        #            style={'margin-top': '15px'}),
+        #     Div(filter_dropdowns['exp'], style={'margin-bottom': '15px', }),
+        #     Div([selctr_tables['exp']])
+        # ]),
+        # # comparison selector
+        # dcc.Tab(
+        #     value=f'{PAGE_ID}-comp-tab', label='Select Treatment',
+        #     className='selector-tab', selected_className='selector-tab--selected', children=[
+        #         html.P(style={'margin-top': '15px'}, children=[
+        #             'Select a specific treatment using the table below. Click on tabs to '
+        #             'the right to see results for a selected treatment'
+        #         ]),
+        #     Div(filter_dropdowns['comp'], style={'margin-bottom': '15px', }),
+        #     Div([selctr_tables['comp']])
+        # ]),
+    tabs = dcc.Tabs(id=f'{PAGE_ID}-tabs', value=f'exp-tab', children=[
         exptab,
         comptab,
 
@@ -236,14 +264,14 @@ def initiate(app, data_set:DataSet, public=False) -> Div:
 
     se_layout = Div([
         Div([
-            html.H1("Explore screen results"),
-            html.P("View results from a single treatment. Select data using the blue tabs, and view results in the green tabs."),
+            html.H1("Screens explorer"),
+            html.P("Select data using the blue tabs, and view results in the green tabs."),
             Div([
                 # inline block so the results control panel goes to the side of it
                 Div([tabs,], style={'display':'inline-block',}),
                 Div([
                     spawn_treatment_reselector(PAGE_ID, is_xy=False),
-                    get_stat_source_selector(PAGE_ID, 'Analysis method:'),
+                    get_stat_source_selector(PAGE_ID, 'Analysis:'),
                 ], id=f'{PAGE_ID}-results-control-panel')
             ],  className='tab-content-box'),
 
@@ -298,8 +326,7 @@ def initiate(app, data_set:DataSet, public=False) -> Div:
             raise PreventUpdate
 
         # get x, y and genes values
-        # todo LFC as it's own table!
-        score_fdr = data_set.get_score_fdr('mag', sig_source, comparisons = [compid])
+        score_fdr = data_set.get_score_fdr('mag', sig_source)
         score, fdr = [score_fdr[k][compid].dropna() for k in ('score', 'fdr')]
 
         # some genes may get filtered out
@@ -307,7 +334,7 @@ def initiate(app, data_set:DataSet, public=False) -> Div:
         score,fdr = [xy.reindex(unified_index) for xy in (score,fdr)]
 
         volcano_data = {'score': score, 'fdr': fdr, 'genes': score.index}
-        gene_options = get_gene_dropdown_lab_val(data_set, score.index)
+        gene_options = get_lab_val(score.index)
 
         LOG.debug(f'End of update_volcano_data with:')
         LOG.debug('     datatable:  '+'\n'.join([f"{k}={volcano_data[k].head()}" for k in ('score', 'fdr')]))
@@ -342,8 +369,8 @@ def initiate(app, data_set:DataSet, public=False) -> Div:
         score_lab = data_set.score_labels[stat_source]
 
         # data for the table
-        dat = data_set.get_score_fdr(stat_source, stat_source, comparisons=[selected_comp])
-        lfc = data_set.get_score_fdr('mag', 'mag', comparisons=[selected_comp])['score'][selected_comp]
+        dat = data_set.get_score_fdr(stat_source, stat_source)
+        lfc = data_set.get_score_fdr('mag', 'mag')['score'][selected_comp]
         score = dat['score'][selected_comp]
         fdr = dat['fdr'][selected_comp]
 
@@ -361,7 +388,7 @@ def initiate(app, data_set:DataSet, public=False) -> Div:
             },
             index=index
         )
-        no_stats = results_tab[[score_lab, 'FDR']].isna().any(axis=1)
+        no_stats = results_tab[[score_lab, 'FDR']].isna().any(1)
         results_tab = results_tab.loc[~no_stats]
         results_tab.index.name = 'Gene'
 
@@ -369,15 +396,37 @@ def initiate(app, data_set:DataSet, public=False) -> Div:
         results_data = results_tab.reset_index().to_dict('records')
 
         columns = [datatable_column_dict(x) for x in results_data[0].keys()]
+        treatment_label = get_treatment_label(comparisons.loc[selected_comp], ans_lab)
 
-
-        treatment_para = get_table_title_text(
-            comparisons.loc[selected_comp],
-            ans_lab
-        )
+        treatment_para = [html.H3(f"{treatment_label[0]}"),
+                          html.H4(f"{treatment_label[1]}")]
 
         return (columns, results_data, treatment_para, )
 
+
+    # # Upon selecting experiment, filter the comparisons table (by setting the value of the
+    # #   filter dropdown) and switch to the comp table tab
+    # @app.callback(
+    #     Output(f'{PAGE_ID}-tabs', 'value'),
+    #     Output(f'{PAGE_ID}-comp-filter-Experiment ID', 'value'),
+    #     Output(f'{PAGE_ID}-selected-exp', 'data', ),
+    #     Input(f'{PAGE_ID}-exp-table', 'selected_rows'),
+    #     State(f'{PAGE_ID}-exp-table', 'data'),
+    #     State(f'{PAGE_ID}-selected-exp', 'data', ),
+    # )
+    # def picked_experiment(selected_row, table_data, previous_exp):
+    #     LOG.debug(f'CALLBACK: picked_experiment (from exp-table): {selected_row}')
+    #     if not selected_row:
+    #         raise PreventUpdate
+    #     print('picked_exp', callback_context.triggered)
+    #     selected_exp = table_data[selected_row[0]]['Experiment ID']
+    #     if selected_exp == previous_exp:
+    #         raise PreventUpdate
+    #
+    #     return ('comp-tab', [selected_exp], selected_exp)
+
+
+    #todo look for Input(f'{PAGE_ID}-selected-comp', 'data') and update
     @app.callback(
         Output(f'{PAGE_ID}-comp-selector', 'value' ),
         Output(f'{PAGE_ID}-comp-selector', 'options'),
@@ -403,9 +452,19 @@ def initiate(app, data_set:DataSet, public=False) -> Div:
     return se_layout
 
 
+def launch_page(source, port, debug):
 
+    # pycharm debug doesn't like __name__ here for some reason.
+    app = dash.Dash('comparison_maker', external_stylesheets=[dbc.themes.BOOTSTRAP])
+
+    if debug:
+        LOG.setLevel(logging.DEBUG)
+
+    source_directory = pathlib.Path(source)
+    data_set = DataSet(source_directory)
+    app.layout = initiate(app, data_set, public=True)
+    app.run_server(debug=debug, host='0.0.0.0', port=int(port), )
 
 if __name__ == '__main__':
-    from crispr_screen_viewer.functions_etc import launch_page
-    launch_page(*get_cmdline_options(), 'ScreensExplorer', initiate)
 
+    launch_page(*get_cmdline_options())

@@ -4,7 +4,7 @@ from dash.dash_table import DataTable
 from dash.dash_table.Format import Format, Scheme
 from crispr_screen_viewer.functions_etc import datatable_column_dict
 from dash import dcc, html, callback_context
-from crispr_screen_viewer.functions_etc import (
+from functions_etc import (
     cell_text_style,
     cell_number_style,
     LOG,
@@ -23,19 +23,10 @@ from typing import Tuple, List, Dict, Callable
 
 #from https://sashamaps.net/docs/resources/20-colors/, 99%,
 
-colours = ['#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231',
-           '#42d4f4', '#f032e6', '#fabed4', '#469990',
-           '#dcbeff', '#9A6324', '#fffac8', '#800000', '#aaffc3',
-           '#000075', '#a9a9a9', '#333333', ]
 
-select_color = '#E865DF'
-view_color   = '#DFE865'
-
+colours = ['#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#42d4f4', '#f032e6', '#fabed4', '#469990',
+           '#dcbeff', '#9A6324', '#fffac8', '#800000', '#aaffc3', '#000075', '#a9a9a9', '#333333', ]
 get_lab_val = lambda arr: [{'label': v, 'value':v} for v in arr]
-
-def get_gene_dropdown_lab_val(data_set, genes):
-    return [{'label': data_set.dropdown_gene_label(gn), 'value': gn} for gn in genes]
-
 styles = {'selector':{'display': 'inline-block', 'border-collapse': 'separate',
                       'border-spacing': '15px 50px', 'margin-bottom': '15px', 'width':'150px'},
           'hidden':{'display':'none'}}
@@ -46,7 +37,27 @@ big_text_style = {
     'word-spacing': '-0.4px',
     'font-weight': '700'}
 
+def get_treatment_label(row, analysis_label='') -> Tuple[str, str]:
+    """Pass comparison row (either from data_set.comparisons.loc[compid] or
+    from dashtable data), return a pair of strings.
 
+    First string comparison specific, second line library, experiment ID."""
+    if '-KO' not in row['Treatment']:
+        if row['KO'] == 'WT':
+            ko = ''
+        else:
+            ko = f" {row['KO']}-KO"
+    else:
+        ko = ''
+
+    if analysis_label:
+        analysis_label = f"{analysis_label}, "
+
+
+    title = (f"Effect of {row['Treatment']} in {row['Cell line']}{ko} cells ({analysis_label}{row['Timepoint']})",
+             f"{row['Library']} library, experiment ID {row['Experiment ID']}")
+
+    return title
 
 def get_annotation_dicts(xs,ys,txts, annote_kw=None) -> List[dict]:
     """dicts defining annotations with x/y/text values as given.
@@ -74,25 +85,118 @@ def get_annotation_dicts(xs,ys,txts, annote_kw=None) -> List[dict]:
     return annotations
 
 
+
+# DEPRECIATED
+def get_reg_stat_selectors(app=None, id_prefix='') -> List[Div]:
+    """Return radio selectors, for selecting stats to be used in plotting.
+
+    Registers a function that handles the score selection. Needs to have
+    output values prefix+"-score-selector" & prefix+"-fdr-selector" captured by the fig
+    update callback.
+
+    If app is None, you'll need to reimpliment all that."""
+
+    if id_prefix:
+        id_prefix = id_prefix+'-'
+
+    if app is not None:
+        @app.callback(
+            [Output(id_prefix + 'score-selector', 'value'),
+             Output(id_prefix + 'fdr-selector', 'value'),
+             Output(id_prefix + 'mixed-div', 'style')],
+
+            [Input(id_prefix + 'analysis-selector', 'value')],
+
+            [State(id_prefix + 'score-selector', 'value'),
+             State(id_prefix + 'fdr-selector', 'value')]
+        )
+        def select_stats_primary(selection, curr_score, curr_fdr):
+            if selection == 'mixed':
+                return curr_score, curr_fdr, styles['selector']
+            else:
+                return selection, selection, styles['hidden']
+
+    return [
+        Div([
+            html.Label('Analysis type:  ', htmlFor='analysis-selector'),
+            dcc.RadioItems(
+                id=id_prefix + 'analysis-selector',
+                options=[
+                    {'label':'DrugZ', 'value':'drz'},
+                    {'label':'MAGeCK',  'value':'mag'},
+                    #{'label':'Mixed...', 'value':'mixed'}
+                ],
+                value='drz',
+                labelStyle={'display': 'inline-block'},
+            )
+        ], style={**styles['selector'], **{'width':170}}),
+
+        # This Div is hidden unless "Mixed" is chosen from Div above.
+        #   Currently inaccessible
+        Div([
+            Div([
+                html.Label('Effect size_____', htmlFor=id_prefix+'score-selector'),
+                dcc.RadioItems(
+                    id=id_prefix + 'score-selector',
+                    options=[{'label':'NormZ', 'value':'drz'},
+                             {'label':'LFC',  'value':'mag'}],
+                    value='drz',
+                ),
+            ], style=styles['selector']),
+
+            Div([
+                html.Label('FDR source', htmlFor=id_prefix+'fdr-selector', ),
+                dcc.RadioItems(
+                    id=id_prefix + 'fdr-selector',
+                    options=[
+                        {'label':'DrugZ', 'value':'drz'},
+                        {'label':'MAGeCK',  'value':'mag'}
+                    ],
+                    value='drz',
+                )], style=styles['selector'])
+        ],  id=id_prefix + 'mixed-div', style=styles['hidden'])
+    ]
+
+# def get_data_source_selector(data_set, id_prefix='') -> List[dcc.Checklist]:
+#     """A Div with a checklist that will be populated data_sources and a
+#     paragraph for reporting missing datasets
+#
+#     IDs: data-source-selector, missing-datasets"""
+#
+#     if id_prefix:
+#         id_prefix = id_prefix+'-'
+#
+#     return [
+#         html.Label('Select data sources:', htmlFor=id_prefix+'data-source-selector'),
+#         dcc.Checklist(
+#             id=id_prefix+'data-source-selector',
+#             options=get_lab_val(data_set.data_sources),
+#             value=data_set.data_sources, # set all selected by default
+#             labelStyle={'display':'inline-block'}
+#         ),
+#         html.P([''], id=id_prefix+'missing-datasets'),
+#     ]
+
 options_analyses = [
     {'label':'DrugZ', 'value':'drz'},
     {'label':'MAGeCK', 'value':'mag'}
 ]
 
 
-def get_stat_source_selector(id_prefix, cardheader='Select analysis algorithm') -> dbc.Card:
+def get_stat_source_selector(id_prefix, label, cardheader='Select analysis algorithm') -> Div:
     """List of single Div with dcc.RadioItems with id
     '{id_prefix}-stat-source-selector'. Options from `options_analyses`"""
 
     sigsourceid = f'{id_prefix}-stat-source-selector'
 
-    return dbc.Card(
+    return Div(dbc.Card(
         [
             dbc.CardHeader(
                 cardheader
             ),
             dbc.CardBody(
                 children=[
+                    html.Label(label, htmlFor=sigsourceid),
                     dcc.RadioItems(
                         id=sigsourceid,
                         options=options_analyses,
@@ -100,8 +204,8 @@ def get_stat_source_selector(id_prefix, cardheader='Select analysis algorithm') 
                     )
                 ]
             ),
-        ], style={'width': '170px'}
-    )
+        ]
+    ))
 
 # **DATATABLE**
 def create_datatable(data_df=None, columns_if_no_df=None):
@@ -206,6 +310,7 @@ def spawn_gene_dropdown(app, id_prefix) -> Div:
         ]
     )
 
+
 def spawn_filter_dropdowns(
         id_prefix, table_str, filter_cols:List[str], comparisons, values:dict=None,
         card_header='Filter table rows by their contents.',
@@ -231,10 +336,6 @@ def spawn_filter_dropdowns(
             value = values[col]
         except:
             value = []
-            
-        choices = []
-        for choice in comparisons[col].unique():
-            choices.append(str(choice))
 
         drpdwn = dbc.Card(
             [
@@ -245,7 +346,7 @@ def spawn_filter_dropdowns(
                         multi=True,
                         style={'min-height':'80px', 'width':'100%'},
                         value=value,
-                        options=[{'label':v, 'value':v} for v in sorted(choices)]
+                        options=[{'label':v, 'value':v} for v in sorted(comparisons[col].unique())]
                     ),
                 ])
             ],

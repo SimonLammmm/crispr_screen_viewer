@@ -1,6 +1,6 @@
-import inspect
 import typing
-#from statsmodels.stats.multitest import multipletests
+
+from statsmodels.stats.multitest import multipletests
 import pandas as pd
 import numpy as np
 import os
@@ -10,7 +10,6 @@ from scipy import odr
 from scipy.stats import linregress
 from typing import Union, List, Dict, Iterable, Collection
 import logging, pickle
-from dash import html
 parse_expid = lambda comp: comp.split('.')[0]
 
 logging.basicConfig()
@@ -59,10 +58,8 @@ def datatable_column_dict(c,):
         return {'name':c, 'id':c}
 
 def doi_to_link(doi):
-    """Return string formated as a Markdown link to doi.org/{doi}"""
+    """Return string formated as a markdown link to doi.org/{doi}"""
     # should be formated to not be a hyperlink, but sometimes it is
-    if pd.isna(doi) or (not doi):
-        return ''
     doi = doi.replace('https', '').replace('http', '').replace('://', '').replace('doi.org/', '')
     return f"[{doi}](https://doi.org/{doi})"
 
@@ -85,7 +82,189 @@ def orthoregress(x, y):
 def index_of_true(bool_mask):
     return bool_mask[bool_mask].index
 
+class DataSet:
+    """Class for holding, retrieving screen data and metadata.
 
+    Storage and retreval of amalgamated results tables. Experiment tables as
+    single analysis type/statistic with filename {ans_type}_{stat}.csv
+    Currently supports MAGeCK ('mag') and DrugZ ('drz').
+
+    Attributes:
+        exp_data: data tables keyed first by analysis type then 'score'|'fdr'
+        comparisons: descriptions of exp_data samples. Indexed by comparison keys
+        score/analysis_labels: text labels for supported analysis types
+        genes: Index used in tables in exp_data
+
+    Methods:
+        get_results: get dict of score and fdr for specified analysis types and
+            datasets."""
+    def __init__(self, source_directory, print_validations=True):
+        source_directory = Path(source_directory)
+
+        # shorthand internal name: label name
+        avail_analyses = []
+        for ans in ('drz', 'mag'):
+             if os.path.isfile(source_directory/f"{ans}_fdr.csv"):
+                 avail_analyses.append(ans)
+
+        self.available_analyses = avail_analyses
+        self.analysis_labels = {'drz':'DrugZ', 'mag':'MAGeCK'}
+        self.score_labels = {'mag':'Log2(FC)', 'drz':'NormZ'}
+
+        # put the data tables in {analysis_type:{score/fdr:pd.DataFrame}} format dictionary
+        exp_data = {ans:{stt:pd.read_csv(source_directory/f"{ans}_{stt}.csv", index_col=0)
+                         for stt in ('score', 'fdr')}
+                    for ans in self.available_analyses}
+
+        # unify the indexes
+        genes = pd.Index([])
+        # use an index from a table from each analysis
+        for analysis in self.available_analyses:
+            genes = genes.union(exp_data[analysis]['fdr'].index)
+        self.genes = genes
+
+        # reindex with the union of genes
+        self.exp_data = {ans:{stt:exp_data[ans][stt].reindex(genes)
+                            for stt in ('score', 'fdr')}
+                       for ans in self.available_analyses}
+
+        comparisons = pd.read_csv(f'{source_directory}/comparisons_metadata.csv', )
+        # this is sometimes put in wrong...
+        m = comparisons['Timepoint'] == 'endpoint'
+        comparisons.loc[m, 'Timepoint'] = 'endpoints'
+        comparisons.loc[m, 'Control group'] = comparisons.loc[m, 'Control group'] \
+            .apply(lambda x: x.replace('endpoint', 'endpoints'))
+
+        comparisons = comparisons.set_index('Comparison ID', drop=False)
+        #comparisons.loc[:, 'Available analyses'] = comparisons['Available analyses'].str.split('|')
+        try:
+            comparisons = comparisons.drop('Available analyses', axis=1)
+        except KeyError:
+            pass
+        comparisons.loc[comparisons.Treatment.isna(), 'Treatment'] = 'No treatment'
+        # these cols could be blank and aren't essential to have values
+        for col in  ['Cell line', 'Library', 'Source']:
+            if col not in comparisons.columns:
+                comparisons.loc[:, col] = 'Unspecified'
+            comparisons.loc[comparisons[col].isna(), col] = 'Unspecified'
+
+        # replace some values with ones that read better
+        for old, new in timepoint_labels.items():
+            comparisons.loc[comparisons.Timepoint == old, 'Timepoint'] = new
+
+        # list of all datasources for filtering
+        self.data_sources = comparisons.Source.fillna('Unspecified').unique()
+        # main metadata tables
+        self.comparisons = comparisons
+        self.experiments_metadata = pd.read_csv(f'{source_directory}/experiments_metadata.csv', )
+        # rename "Experiment name" to "Experiment ID" for consistency
+        colmap = {k:k for k in self.experiments_metadata}
+        colmap['Experiment name'] = 'Experiment ID'
+        self.experiments_metadata.columns = self.experiments_metadata.columns.map(colmap)
+        self.experiments_metadata.set_index('Experiment ID', drop=False, inplace=True)
+
+
+        # add formated DOI to the comparisons metadata
+        dois = self.experiments_metadata.loc[
+            self.comparisons['Experiment ID'],
+            'DOI'
+        ].apply(doi_to_link).values
+
+        self.comparisons.insert(2, 'DOI', dois)
+
+        if print_validations:
+            # Print information that might be helpful in spotting data validity issues
+            # Check for comparisons present in the metadata/actual-data but missing
+            #   in the other
+            all_good = True
+            for ans in self.available_analyses:
+                score_comps = self.exp_data[ans]['score'].columns
+                meta_comps = self.comparisons.index
+
+                meta_in_score = meta_comps.isin(score_comps)
+                missing_in_data = meta_comps[~meta_in_score]
+                # todo log.warning
+                # todo check experiments metadata
+                if missing_in_data.shape[0] > 0:
+                    all_good = False
+                    print(
+                        f"Comparisons in comparisons metadata but not in {ans}_score.csv:"
+                        f"\n    {', '.join(missing_in_data)}\n"
+                    )
+                score_in_meta = score_comps.isin(meta_comps)
+                missing_in_score = score_comps[~score_in_meta]
+                if missing_in_data.shape[0] > 0:
+                    all_good = False
+                    print(
+                        f"Comparisons in {ans}_score.csv, but not in comparisons metadata:"
+                        f"\n    {', '.join(missing_in_score)}\n"
+                    )
+            comps = self.comparisons.index
+            if comps.duplicated().any():
+                all_good = False
+                print('Duplicate comparisons found - this will probably stop the server from working:')
+                print('   ' , ', '.join(sorted(comps.index[comps.index.duplicated(keep=False)])))
+            if all_good:
+                print(f'All comparisons data in {source_directory} are consistent')
+
+            # check all comparison ExpID appear in experiments metadata
+            # the reverse isn't fatal
+            expids = self.comparisons['Experiment ID'].unique()
+            found = [xi in self.experiments_metadata.index for xi in expids]
+            if not all(found):
+                not_found = [x for (x, b) in zip(expids, found) if not b]
+                print('Experiment IDs used in comparisons_metadata not found in experiments_metadata:\n'
+                      f'   {", ".join(not_found)}')
+
+
+
+    def get_score_fdr(self, score_anls:str, fdr_anls:str=None,
+                      data_sources:Collection= 'all') -> Dict[str, pd.DataFrame]:
+        """Get score and FDR tables for the analysis types & data sets.
+        Tables give the per gene values for included comparisons.
+
+        Arguments:
+            score_anls: The analysis type from which to get the score values
+                per gene
+            fdr_anls: Optional. As score_anslys
+            data_sources: Data sources (i.e. SPJ, or other peoples papers) to
+                include in the returned DFs. Any comparison that comes from a
+                dataset that does not have both fdr/score analysis types
+                available will not be present in the table.
+
+        Returns {'score':pd.DataFrame, 'fdr':pd.DataFrame}"""
+
+        # if only one type supplied, copy it across
+        if fdr_anls is None:
+            fdr_anls = score_anls
+
+        score_fdr = {stt:self.exp_data[ans][stt] for ans, stt in ((score_anls, 'score'), (fdr_anls, 'fdr'))}
+
+        if data_sources == 'all':
+            return score_fdr
+
+        # Filter returned comparisons (columns) by inclusion in data sources and having
+        #   results for both analysis types
+        comps_mask = self.comparisons.Source.isin(data_sources)
+        # for analysis_type in (score_anls, fdr_anls):
+        #     m = self.comparisons['Available analyses'].apply(lambda available: analysis_type in available)
+        #     comps_mask = comps_mask & m
+        comparisons = index_of_true(comps_mask)
+        score_fdr = {k:tab.reindex(columns=comparisons) for k, tab in score_fdr.items()}
+
+        return score_fdr
+
+
+def load_dataset(paff):
+    """If paff is a dir, the dataset is constructed from the files
+    within, otherwise it is assumed to be a pickle."""
+    if os.path.isfile(paff):
+        LOG.info('args.data_path is a file, assuming pickle and loading.')
+        with open(paff, 'rb') as f:
+            data_set = pickle.load(f)
+    else:
+        data_set = DataSet(Path(paff))
+    return data_set
 
 def load_mageck_tables(prefix:str, controls:Iterable[str]):
     """Get a dict of DF of mageck results keyed to control groups.
@@ -246,10 +425,8 @@ def tabulate_score(prefix, return_ps=False):
     for exp in ps.columns:
         sig_df.loc[:, (exp, 'p_neg')] = ps[exp]
         sig_df.loc[:, (exp, 'p_pos')] = 1-ps[exp]
-        # sig_df.loc[:, (exp, 'fdr_neg')] = multipletests(ps[exp], method='fdr_bh')[1]
-        # sig_df.loc[:, (exp, 'fdr_pos')] = multipletests(1 - ps[exp], method='fdr_bh')[1]
-        sig_df.loc[:, (exp, 'fdr_neg')] = p_adjust_bh(ps[exp])
-        sig_df.loc[:, (exp, 'fdr_pos')] = p_adjust_bh(1-ps[exp])
+        sig_df.loc[:, (exp, 'fdr_neg')] = multipletests(ps[exp], method='fdr_bh')[1]
+        sig_df.loc[:, (exp, 'fdr_pos')] = multipletests(1 - ps[exp], method='fdr_bh')[1]
         sig_df.loc[:, (exp, 'jacks_score')] = genes[exp]
         sig_df.loc[:, (exp, 'stdev')] = genesstd[exp]
         score_table = sig_df[exp].copy()
@@ -326,9 +503,9 @@ def tabulate_drugz_files(file_names, prefix, compjoiner='-'):
 def get_selector_table_filter_keys(public=False) -> Dict[str, List[str]]:
     """Get dictionary used to filter the exp and comp tables. """
     filter_keys = {
-        'exp':['Treatment', 'Cell line', 'KO', 'Library', 'Exorcised'],
+        'exp':['Treatment', 'Cell line', 'KO', 'Library'],
         'comp':['Treatment', 'Cell line', 'KO', 'Timepoint',
-                'Library', 'Exorcised', 'Citation',]
+                'Library', 'Experiment ID',]
     }
     if not public:
         for k, l in filter_keys.items():
@@ -339,33 +516,32 @@ def get_selector_table_filter_keys(public=False) -> Dict[str, List[str]]:
 def get_metadata_table_columns(public, page_id) -> Dict[str, List[str]]:
     # this is set up so that different pages can recieve different columns but
     # at the time of writing they all use the same...
-    tab_columns = {
-        'exp':['Citation', 'Treatment', 'Cell line', 'KO',  'Library', 'Exorcised', 'DOI',  'Date'],
-        'comp':['Treatment', 'Dose', 'Timepoint',
+    tab_columns_public = {
+        'exp':[ 'Citation', 'Treatment', 'Cell line', 'KO',  'Library', 'DOI', 'Experiment ID', ],
+        'comp':['Comparison ID',  'Treatment', 'Dose', 'Timepoint',
                 'Growth inhibition %', 'Days grown', 'Cell line', 'KO',
-                'Library', 'Exorcised', 'Citation', 'DOI', ]
+                'Library', 'Experiment ID', 'DOI']
     }
-    # tab_columns_private = {
-    #     'exp':['Treatment', 'Cell line', 'KO',  'Library', 'Citation', 'DOI'],
-    #     'comp':['Comparison ID',  'Treatment', 'Dose', 'Timepoint',
-    #             'Growth inhibition %', 'Days grown', 'Cell line', 'KO',
-    #             'Library', 'Citation', 'DOI']
-    # }
+    tab_columns_private = {
+        'exp':['Treatment', 'Cell line', 'KO',  'Library', 'Citation', 'Experiment ID', 'DOI'],
+        'comp':['Comparison ID',  'Treatment', 'Dose', 'Timepoint',
+                'Growth inhibition %', 'Days grown', 'Cell line', 'KO',
+                'Library', 'Experiment ID', 'DOI']
+    }
 
-    #tab_columns = tab_columns_public if public else tab_columns_private
+    tab_columns = tab_columns_public if public else tab_columns_private
 
     if page_id == 'msgv':
         return tab_columns
     elif page_id in ('cm', 'se'):
         return tab_columns
     else:
-        raise RuntimeError(f"page_id={page_id} not recognised, only 'cm', 'se' or 'msgv'")
+        raise RuntimeError(f"page_id={page_id} not recognised, only 'cm', 'se' or 'msgv")
 
 
 
 def get_cmdline_options() -> typing.Tuple[str, str, bool]:
     """[script.py] SOURCE PORT [DEBUG]"""
-    print('[script.py] SOURCE PORT [DEBUG]')
     import sys
     args = sys.argv
     if (len(args) == 1) or (args[1] in ('-h', '--help')):
@@ -379,124 +555,3 @@ def get_cmdline_options() -> typing.Tuple[str, str, bool]:
         debug = False
 
     return source, port, debug
-
-import dash, pathlib
-import dash_bootstrap_components as dbc
-def launch_page(source:Union[pathlib.Path, str],
-                port:int,
-                debug:bool,
-                name:str,
-                initiate:typing.Callable):
-    """Create the app, set debug levels, call `initiate` """
-    from dataset import DataSet # not top level to avoid circular import
-
-    app = dash.Dash(name, external_stylesheets=[dbc.themes.BOOTSTRAP])
-
-    if debug:
-        LOG.setLevel(logging.DEBUG)
-    LOG.debug(source)
-    source_directory = pathlib.Path(source)
-    data_set = DataSet(source_directory)
-    app.layout = initiate(app, data_set, public=True)
-    app.run_server(debug=debug, host='0.0.0.0', port=int(port), )
-
-
-def html_small_span(s):
-    """Wrap s in html tags specifying small text using <span>
-
-    Lit: f'<span style="font-size: small;">{s}</span>'
-    """
-    return f'<span style="font-size: small;">{s}</span>'
-
-def getfuncstr():
-    try:
-        return inspect.currentframe().f_back.f_code.co_name
-    except Exception as e:
-        return f'{__name__}.getfuncstr() failed with error:\n\t{e}'
-
-
-def p_adjust_bh(p:Collection) -> np.ndarray:
-    """Benjamini-Hochberg p-value correction for multiple hypothesis testing."""
-
-    p = np.asfarray(p)
-    if any(np.isnan(p)):
-        import warnings
-        warnings.warn(f'p_adjust_bh(): NaNs in p-values! '
-                      f'Called by {inspect.currentframe().f_back.f_code.co_name}')
-    by_descend = p.argsort()[::-1]
-    by_orig = by_descend.argsort()
-    steps = float(len(p)) / np.arange(len(p), 0, -1)
-    q = np.minimum(1, np.minimum.accumulate(steps * p[by_descend]))
-    return q[by_orig]
-
-
-def bicolour_cmap(mn, mx, minmax_value=(-3, 3), clr_intensity=170):
-    """Return a plotly formatted list of colours that translates to a
-    colour map with 0=white, min(mn, -3)=red, max(mx, 3)=blue, so if
-    mn > 0 and mx > 0 returned colours will be light-blue -> darker-blue."""
-    colours = []
-    thresholds = list(minmax_value)
-    if mn < -3:
-        thresholds[0] = mn
-    if mx > 3:
-        thresholds[1] = mx
-
-    # ==clr_intensity at threshold, 255 in centre.
-    get_primary_int = lambda p: 255 - (p * (255 - clr_intensity))
-
-    for x in (mn, mx):
-        if x < 0:
-            prop = x / thresholds[0]
-            bg_int = int((1 - prop) * 255)
-            clr = f"rgb({get_primary_int(prop)}, {bg_int}, {bg_int})"
-        else:
-            prop = x / thresholds[1]
-            print(prop)
-            bg_int = int((1 - prop) * 255)
-            clr = f"rgb({bg_int}, {bg_int}, {get_primary_int(prop)})"
-        colours.append(clr)
-    if (mn < 0) and (mx > 0):
-        span = mx - mn
-        central = (0 - mn) / span
-        colours = [(0, colours[0]),
-                   (central, 'rgb(255, 255, 255)'),
-                   (1, colours[1])]
-    else:
-        colours = [(i, c) for i, c in enumerate(colours)]
-    return colours
-
-def get_treatment_label(row:dict, analysis_label='', inline_style=True) -> typing.Tuple[str, str]:
-    """Pass comparison row (either from data_set.comparisons.loc[compid] or
-    from dashtable data), return a pair of strings.
-
-    First string comparison specific, second line library, experiment ID."""
-    if '-KO' not in row['Treatment']:
-        if row['KO'] == 'WT':
-            ko = ''
-        else:
-            ko = f" {row['KO']}-KO"
-    else:
-        ko = ''
-
-    if analysis_label:
-        analysis_label = f"{analysis_label}, "
-
-    if inline_style:
-        idstr = f'<span style="font-size: small;">(ID: {row["Comparison ID"]})</span>'
-    else:
-        idstr = f'(ID: {row["Comparison ID"]})'
-
-    title = (f"Effect of {row['Treatment']} in {row['Cell line']}{ko} cells ({analysis_label}{row['Timepoint']})",
-             f"{row['Library']} library {idstr}")
-
-    return title
-
-def get_table_title_text(comp_row, analysis_lab):
-    treatment_label = get_treatment_label(
-        comp_row,
-        analysis_lab,
-        inline_style=False,
-    )
-
-    return [html.H3(f"{treatment_label[0]}"),
-            html.P(f"{treatment_label[1]}")]
